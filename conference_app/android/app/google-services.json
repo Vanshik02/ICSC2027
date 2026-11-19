@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1073100272218",
+    "project_id": "icsc-2027",
+    "storage_bucket": "icsc-2027.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1073100272218:android:9c1b544dcfbd3caf5cde63",
+        "android_client_info": {
+          "package_name": "com.icsc2027.conference_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCsr0AKvGPHhXHGb9cXzF-Zd5c0gOaGYsc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
