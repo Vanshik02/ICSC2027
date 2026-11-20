@@ -128,44 +128,139 @@ export default function App() {
     JSON.stringify(item).toLowerCase().includes(search.toLowerCase())
   ), [items, search])
 
-  async function saveRecord(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    if (!modal) return
-    const form = new FormData(event.currentTarget)
-    const data: Record<string, unknown> = {}
-    if (modal === 'conference') {
-      for (const key of ['title', 'conferenceName', 'venue', 'startDate', 'endDate', 'website', 'ieeeRecordNumber']) {
-        data[key] = String(form.get(key) ?? '').trim()
-      }
-      data.isPublished = true
-      setSaving(true)
-      try {
-        await updateDoc(doc(db, 'conference_info', 'main'), data)
-        setNotice('Conference information updated.')
-        setModal(null)
-      } catch (e) { setError(messageOf(e)) } finally { setSaving(false) }
-      return
-    }
-    const cfg = configs[modal]
-    for (const field of cfg.fields) data[field.key] = String(form.get(field.key) ?? '').trim()
-    data.isPublished = form.get('isPublished') === 'on'
-    if (modal === 'announcements' && !editing) data.createdAt = serverTimestamp()
-    setSaving(true)
-    try {
-      if (editing) await updateDoc(doc(db, cfg.collection, editing.id), data)
-      else await addDoc(collection(db, cfg.collection), data)
-      setNotice(`${cfg.title} ${editing ? 'updated' : 'added'} successfully.`)
-      setModal(null); setEditing(null)
-    } catch (e) { setError(messageOf(e)) } finally { setSaving(false) }
+
+async function removeRecord(section: ManagedSection, item: any) {
+  const cfg = configs[section]
+
+  if (!window.confirm(`Are you sure you want to delete this ${cfg.title.toLowerCase()} record?`)) {
+    return
   }
 
-  async function removeRecord(kind: ManagedSection, item: RecordItem) {
-    if (!window.confirm(`Delete "${String(item.title ?? item.name ?? 'this record')}"?`)) return
-    try {
-      await deleteDoc(doc(db, configs[kind].collection, item.id))
-      setNotice('Record deleted.')
-    } catch (e) { setError(messageOf(e)) }
+  try {
+    await deleteDoc(doc(db, cfg.collection, item.id))
+    setNotice(`${cfg.title} deleted successfully.`)
+  } catch (e) {
+    setError(messageOf(e))
   }
+}
+
+async function saveRecord(event: FormEvent<HTMLFormElement>) {
+  event.preventDefault()
+  if (!modal) return
+
+  const form = new FormData(event.currentTarget)
+  const data: Record<string, unknown> = {}
+
+  if (modal === 'conference') {
+    for (const key of [
+      'title',
+      'conferenceName',
+      'venue',
+      'startDate',
+      'endDate',
+      'website',
+      'ieeeRecordNumber',
+    ]) {
+      data[key] = String(form.get(key) ?? '').trim()
+    }
+
+    data.isPublished = true
+    setSaving(true)
+
+    try {
+      await updateDoc(doc(db, 'conference_info', 'main'), data as any)
+      setNotice('Conference information updated.')
+      setModal(null)
+    } catch (e) {
+      setError(messageOf(e))
+    } finally {
+      setSaving(false)
+    }
+    return
+  }
+
+  const cfg = configs[modal]
+
+  for (const field of cfg.fields) {
+    data[field.key] = String(form.get(field.key) ?? '').trim()
+  }
+
+  data.isPublished = form.get('isPublished') === 'on'
+
+  if (modal === 'announcements' && !editing) {
+    data.createdAt = serverTimestamp()
+  }
+
+  // Send a notification only when a new announcement is published
+  // or an existing draft is changed to published.
+  const shouldSendNotification =
+    modal === 'announcements' &&
+    data.isPublished === true &&
+    (!editing || editing.isPublished === false)
+
+  setSaving(true)
+
+  try {
+    // Save the content to Firestore first.
+    if (editing) await updateDoc(doc(db, cfg.collection, editing.id), data as any)
+     else {
+      await addDoc(collection(db, cfg.collection), data)
+    }
+
+    setNotice(`${cfg.title} ${editing ? 'updated' : 'added'} successfully.`)
+    setModal(null)
+    setEditing(null)
+
+    // Send push notification after a successful announcement save.
+    if (shouldSendNotification) {
+      try {
+        const currentUser = auth.currentUser
+
+        if (!currentUser) {
+          throw new Error('Admin session expired. Please sign in again.')
+        }
+
+        const idToken = await currentUser.getIdToken()
+
+        const response = await fetch(
+          'https://icsc-2027-notifications.vanshikjainxf2005.workers.dev/',
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${idToken}`,
+            },
+            body: JSON.stringify({
+              title: data.title,
+              body: data.message,
+            }),
+          }
+        )
+
+        const result = await response.json() as {
+          success?: boolean
+          message?: string
+          error?: string
+        }
+
+        if (!response.ok || !result.success) {
+          throw new Error(result.error || 'Notification sending failed.')
+        }
+
+        setNotice('Announcement published and push notification sent successfully!')
+      } catch (notificationError) {
+        setError(
+          `Announcement was saved, but notification failed: ${messageOf(notificationError)}`
+        )
+      }
+    }
+  } catch (e) {
+    setError(messageOf(e))
+  } finally {
+    setSaving(false)
+  }
+}
+
 
   async function saveConference(event: FormEvent<HTMLFormElement>) { await saveRecord(event) }
 

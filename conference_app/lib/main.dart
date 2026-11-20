@@ -1,5 +1,10 @@
+
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 import 'firebase_options.dart';
 import 'core/theme/app_theme.dart';
@@ -10,12 +15,129 @@ import 'screens/speakers/speakers_screen.dart';
 import 'screens/my_schedule/my_schedule_screen.dart';
 import 'screens/more/more_screen.dart';
 
+final FlutterLocalNotificationsPlugin localNotifications =
+    FlutterLocalNotificationsPlugin();
+
+const AndroidNotificationChannel notificationChannel =
+    AndroidNotificationChannel(
+  'icsc_notifications',
+  'ICSC 2027 Notifications',
+  description: 'Announcements and important conference updates',
+  importance: Importance.high,
+);
+
+// Handles messages received while the app is in the background.
+@pragma('vm:entry-point')
+Future<void> firebaseMessagingBackgroundHandler(
+    RemoteMessage message) async {
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
+}
+
+Future<void> initializeLocalNotifications() async {
+  const AndroidInitializationSettings androidSettings =
+      AndroidInitializationSettings('@mipmap/ic_launcher');
+
+  const InitializationSettings settings = InitializationSettings(
+    android: androidSettings,
+  );
+
+  await localNotifications.initialize(settings);
+
+  final androidPlugin = localNotifications
+      .resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin>();
+
+  await androidPlugin?.createNotificationChannel(notificationChannel);
+}
+
+Future<void> configureNotifications() async {
+  try {
+    final messaging = FirebaseMessaging.instance;
+
+    // Ask the attendee for notification permission.
+    final permission = await messaging.requestPermission(
+      alert: true,
+      badge: true,
+      sound: true,
+    );
+
+    debugPrint('Notification permission: ${permission.authorizationStatus}');
+
+    // Subscribe attendees who have granted permission.
+    if (permission.authorizationStatus == AuthorizationStatus.authorized ||
+        permission.authorizationStatus == AuthorizationStatus.provisional) {
+      await messaging.subscribeToTopic('icsc_2027_all');
+      debugPrint('Subscribed to ICSC 2027 notifications.');
+    }
+
+    // Handle notifications received while the app is open.
+    FirebaseMessaging.onMessage.listen((RemoteMessage message) async {
+      final notification = message.notification;
+
+      final title = notification?.title ?? message.data['title']?.toString();
+      final body = notification?.body ?? message.data['body']?.toString();
+
+      if (title == null && body == null) return;
+
+      await localNotifications.show(
+        message.hashCode,
+        title ?? 'ICSC 2027',
+        body ?? '',
+        const NotificationDetails(
+        android: AndroidNotificationDetails(
+        'icsc_notifications',
+        'ICSC 2027 Notifications',
+        channelDescription:
+          'Announcements and important conference updates',
+        importance: Importance.high,
+        priority: Priority.high,
+        icon: '@mipmap/ic_launcher',
+      ),
+    ),
+  payload: message.data.toString(),
+);
+    });
+
+    // Handle notification taps when the app is in the background.
+    FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
+      debugPrint('Notification opened: ${message.data}');
+    });
+
+    // Handle notification taps that launch a terminated app.
+    final initialMessage = await messaging.getInitialMessage();
+
+    if (initialMessage != null) {
+      debugPrint('App opened from notification: ${initialMessage.data}');
+    }
+  } catch (e) {
+    debugPrint('Notification setup error: $e');
+  }
+}
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
+
+  FirebaseMessaging.onBackgroundMessage(
+    firebaseMessagingBackgroundHandler,
+  );
+
+  await initializeLocalNotifications();
 
   runApp(const ICSCApp());
+
+  // Request permission after the app has started.
+  unawaited(
+    Future.delayed(
+      const Duration(seconds: 1),
+      configureNotifications,
+    ),
+  );
 }
 
 class ICSCApp extends StatelessWidget {
@@ -41,17 +163,17 @@ class MainNavigation extends StatefulWidget {
 
 class _MainNavigationState extends State<MainNavigation> {
   int selectedIndex = 0;
-int myScheduleRefreshKey = 0;
+  int myScheduleRefreshKey = 0;
 
-void navigateTo(int index) {
-  setState(() {
-    selectedIndex = index;
+  void navigateTo(int index) {
+    setState(() {
+      selectedIndex = index;
 
-    if (index == 3) {
-      myScheduleRefreshKey++;
-    }
-  });
-}
+      if (index == 3) {
+        myScheduleRefreshKey++;
+      }
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -59,12 +181,15 @@ void navigateTo(int index) {
       HomeScreen(onNavigate: navigateTo),
       const ScheduleScreen(),
       const SpeakersScreen(),
-      MyScheduleScreen( key: ValueKey(myScheduleRefreshKey)),
+      MyScheduleScreen(key: ValueKey(myScheduleRefreshKey)),
       const MoreScreen(),
     ];
 
     return Scaffold(
-      body: IndexedStack(index: selectedIndex, children: screens),
+      body: IndexedStack(
+        index: selectedIndex,
+        children: screens,
+      ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: selectedIndex,
         onDestinationSelected: navigateTo,
